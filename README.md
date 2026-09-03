@@ -1,6 +1,6 @@
 # Risu BG Bridge
 
-> **v0.9.0-beta.1** — public beta. Back up your database and server
+> **v0.9.0-beta.2** — public beta. Back up your database and server
 > configuration before applying a host adapter. End-to-end testing with real
 > provider accounts remains the operator's responsibility.
 
@@ -106,7 +106,7 @@ pnpm test    # portable tests; locked-fixture tests skip when targets/cache is a
 pnpm build   # runs tsc and outputs ESM declarations and source maps
 ```
 
-All 118 unit, persistence, fault-injection, packaging, and compatibility tests
+All 121 unit, persistence, fault-injection, packaging, and compatibility tests
 passed in the release build environment with the locally verified PocketRisu
 snapshot present. Public clones omit that third-party snapshot; the tests that
 require it report `SKIP`, while portable tests still run. Browser E2E and
@@ -117,6 +117,20 @@ The directly importable API v3 artifact is
 and a job-status dashboard. Compatible hosts use `backgroundModels`; stock
 hosts may use an explicitly configured non-plugin `fallback_model` through
 `runLLMModel` with plugin recursion disabled.
+
+The plugin also publishes a canonical `//@update-url`. RisuAI's native plugin
+settings page checks the remote `//@version`, asks for confirmation, then
+re-imports the script while preserving the fixed internal name. Version
+`0.9.0-beta.1` requires one manual upgrade because it predates this metadata;
+automatic update discovery begins with `0.9.0-beta.2`. The script advertises
+numeric updater version `0.9.0.2` because the host comparator is numeric-dot
+based; the package and Git tag retain the SemVer prerelease form.
+
+The plugin dashboard makes the same state visible without relying on the small
+native update icon. It reports update available/current/unknown separately
+from host-core state: ready, provider-registry setup required, or matching core
+adapter required. Patch guidance is shown only when the negotiated host
+capabilities prove that durable support is absent.
 
 ---
 

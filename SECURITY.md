@@ -3,6 +3,8 @@
 ## Supported versions
 
 Only the latest published beta is supported while the project is below 1.0.
+Plugin updates are accepted only from the HTTPS URL declared in the distributed
+script. Review the GitHub release and checksum before confirming an update.
 
 ## Reporting a vulnerability
 

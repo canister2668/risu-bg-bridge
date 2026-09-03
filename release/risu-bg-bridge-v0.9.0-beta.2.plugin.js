@@ -1,6 +1,8 @@
 //@name risu_bg_bridge
 //@api 3.0
-//@version 0.9.0-beta.1
+//@version 0.9.0.2
+//@update-url https://raw.githubusercontent.com/canister2668/risu-bg-bridge/refs/heads/main/plugin/risu-bg-bridge.plugin.js
+//@link https://github.com/canister2668/risu-bg-bridge Risu BG Bridge documentation and releases
 //@display-name Risu Background Bridge
 //@description Durable server-model provider and background-job monitor for compatible RisuAI hosts
 //@arg credential_ref string Server credential reference, for example provider-account://openai/default
@@ -10,7 +12,11 @@
 (async () => {
   'use strict';
 
-  const PLUGIN_VERSION = '0.9.0-beta.1';
+  const PLUGIN_VERSION = '0.9.0-beta.2';
+  const UPDATE_VERSION = '0.9.0.2';
+  const UPDATE_URL = 'https://raw.githubusercontent.com/canister2668/risu-bg-bridge/refs/heads/main/plugin/risu-bg-bridge.plugin.js';
+  const RELEASES_URL = 'https://github.com/canister2668/risu-bg-bridge/releases';
+  const ADAPTERS_URL = 'https://github.com/canister2668/risu-bg-bridge/tree/main/adapters';
   const TERMINAL = new Set(['succeeded', 'completed', 'failed', 'cancelled', 'ambiguous']);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -43,6 +49,68 @@
       if (typeof value === 'string') return value;
     } catch { /* plain text provider */ }
     return source;
+  }
+
+  function compareUpdateVersions(left, right) {
+    const a = String(left).split('.').map(Number);
+    const b = String(right).split('.').map(Number);
+    for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+      const av = a[index] || 0;
+      const bv = b[index] || 0;
+      if (av !== bv) return av > bv ? 1 : -1;
+    }
+    return 0;
+  }
+
+  async function checkUpdate() {
+    try {
+      const response = await Risuai.nativeFetch(UPDATE_URL, {
+        method: 'GET',
+        headers: { Range: 'bytes=0-511' },
+        cache: 'no-store',
+      });
+      if (!response || response.status < 200 || response.status >= 300) {
+        throw new Error(`HTTP ${response?.status ?? 'unknown'}`);
+      }
+      const source = await response.text();
+      const remoteVersion = source.match(/\/\/@version\s+([^\s]+)/)?.[1]?.trim();
+      if (!remoteVersion) throw new Error('remote version metadata missing');
+      return {
+        state: compareUpdateVersions(remoteVersion, UPDATE_VERSION) > 0 ? 'available' : 'current',
+        remoteVersion,
+      };
+    } catch (error) {
+      return { state: 'unknown', error: String(error?.message ?? error) };
+    }
+  }
+
+  function assessHost(caps) {
+    if (!caps?.features) {
+      return {
+        state: 'patch',
+        title: 'Core bridge not detected',
+        detail: 'Install the matching host adapter for tab-close durability. Stock RisuAI can use fallback_model in foreground mode.',
+      };
+    }
+    if (!caps.features.tabCloseDurable) {
+      return {
+        state: 'patch',
+        title: 'Core patch required',
+        detail: `${caps.adapter?.target || 'This host'} does not advertise tab-close durable jobs. Apply only the adapter matching the exact host version.`,
+      };
+    }
+    if (!caps.features.pluginJobCreation || !caps.features.serverProviders) {
+      return {
+        state: 'config',
+        title: 'Core bridge detected · setup required',
+        detail: 'Durable core support is present, but plugin job creation is disabled. Configure the server provider registry and its secret environment variable.',
+      };
+    }
+    return {
+      state: 'ready',
+      title: 'Core bridge ready',
+      detail: 'Plugin-created durable jobs and server-side provider references are available.',
+    };
   }
 
   async function capabilities() {
@@ -167,7 +235,8 @@
   });
 
   async function renderDashboard() {
-    const caps = await capabilities();
+    const [caps, update] = await Promise.all([capabilities(), checkUpdate()]);
+    const host = assessHost(caps);
     const jobs = caps ? [
       ...(await Risuai.backgroundModels.listJobs({ active: true })),
       ...(await Risuai.backgroundModels.listJobs({ unclaimed: true })),
@@ -177,12 +246,26 @@
       <style>
         body{margin:0;padding:18px;background:#15151b;color:#eee;font:14px system-ui,sans-serif}
         h2{margin:0 0 12px}.card{padding:12px;margin:8px 0;border:1px solid #3a3a48;border-radius:10px;background:#20202a}
-        .muted{color:#aaa}.ok{color:#7ee787}.bad{color:#ff7b72}button{padding:8px 12px;margin:6px;border:0;border-radius:8px;cursor:pointer}
+        .muted{color:#aaa}.ok{color:#7ee787}.warn{color:#e3b341}.bad{color:#ff7b72}.badge{float:right;font-weight:700}
+        button,.action{display:inline-block;padding:8px 12px;margin:6px;border:0;border-radius:8px;cursor:pointer;background:#343445;color:#fff;text-decoration:none}
         code{overflow-wrap:anywhere}
       </style>
       <h2>Risu Background Bridge ${PLUGIN_VERSION}</h2>
-      <div class="card ${caps?.features?.tabCloseDurable ? 'ok' : 'bad'}">
-        ${caps ? `${escapeHtml(caps.adapter?.target)} ${escapeHtml(caps.adapter?.version)} · durable ${caps.features.tabCloseDurable ? 'ON' : 'OFF'}` : 'Compatible host bridge not found · foreground only'}
+      <div class="card ${update.state === 'available' ? 'warn' : update.state === 'current' ? 'ok' : 'muted'}">
+        <span class="badge">${update.state === 'available' ? 'UPDATE' : update.state === 'current' ? 'CURRENT' : 'UNKNOWN'}</span>
+        <b>Plugin update</b><br>
+        ${update.state === 'available'
+          ? `Version ${escapeHtml(update.remoteVersion)} is available. Use RisuAI Settings → Plugins to confirm the native update.`
+          : update.state === 'current'
+            ? `Updater ${UPDATE_VERSION} is current.`
+            : `Update check unavailable: ${escapeHtml(update.error)}`}
+        <br><a class="action" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">Open releases</a>
+      </div>
+      <div class="card ${host.state === 'ready' ? 'ok' : host.state === 'config' ? 'warn' : 'bad'}">
+        <span class="badge">${host.state === 'ready' ? 'READY' : host.state === 'config' ? 'SETUP' : 'PATCH'}</span>
+        <b>${escapeHtml(host.title)}</b><br>${escapeHtml(host.detail)}<br>
+        ${caps ? `<span class="muted">${escapeHtml(caps.adapter?.target)} ${escapeHtml(caps.adapter?.version)} · durable ${caps.features.tabCloseDurable ? 'ON' : 'OFF'}</span><br>` : ''}
+        ${host.state !== 'ready' ? `<a class="action" href="${ADAPTERS_URL}" target="_blank" rel="noopener noreferrer">Open adapter guide</a>` : ''}
       </div>
       ${unique.length ? unique.map((job) => `<div class="card"><b>${escapeHtml(job.kind)} · ${escapeHtml(job.state)}</b><br><code>${escapeHtml(job.jobId)}</code><br><span class="muted">${escapeHtml(job.updatedAt)}</span></div>`).join('') : '<div class="card muted">No active or unclaimed jobs.</div>'}
       <button id="refresh">Refresh</button><button id="close">Close</button>`;

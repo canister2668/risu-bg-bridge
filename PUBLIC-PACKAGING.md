@@ -2,9 +2,39 @@
 
 ## Install
 
-Import `release/risu-bg-bridge-v0.9.0-beta.1.plugin.js` from RisuAI Settings →
+Import `release/risu-bg-bridge-v0.9.0-beta.2.plugin.js` from RisuAI Settings →
 Plugins. The plugin is API v3 and requests provider/background-model
 permission only through the host API.
+
+## Updates
+
+Starting with `0.9.0-beta.2`, the plugin declares a canonical HTTPS
+`//@update-url`. RisuAI checks the first 512 bytes of that URL, compares the
+`//@version`, and displays its native update button in Settings → Plugins when
+a newer version exists. Installation is still confirmed by the user and the
+internal plugin name remains fixed as `risu_bg_bridge`.
+
+RisuAI's comparator is numeric-dot based rather than full SemVer. Therefore the
+beta.2 release advertises updater version `0.9.0.2` while the package and Git
+tag remain `0.9.0-beta.2`. This orders correctly after beta.1's effective
+`0.9.0.1` value and before a future `1.0.0` release.
+
+The plugin's own dashboard also displays the update state. It never silently
+installs downloaded code: the action points back to RisuAI's native confirmed
+update flow and the signed-off GitHub releases page.
+
+The adjacent host-status card distinguishes three cases:
+
+- **READY**: durable plugin jobs and server providers are available.
+- **SETUP**: the host patch is present, but the administrator still needs to
+  configure the server provider registry.
+- **PATCH**: no durable host bridge was negotiated; the exact-version adapter
+  guide is exposed instead of pretending that the plugin alone can survive a
+  closed tab.
+
+Users of `0.9.0-beta.1` must import `0.9.0-beta.2` manually once because the
+older artifact did not yet contain an update URL. Subsequent versions can use
+RisuAI's native updater.
 
 This is a beta release. Back up the RisuAI database and server configuration
 before applying a host patch. The plugin alone cannot make foreground model

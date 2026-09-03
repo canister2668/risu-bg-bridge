@@ -5,6 +5,110 @@ import vm from "node:vm";
 import test from "node:test";
 
 const pluginUrl = new URL("../plugin/risu-bg-bridge.plugin.js", import.meta.url);
+const releasePluginUrl = new URL("../release/risu-bg-bridge-v0.9.0-beta.2.plugin.js", import.meta.url);
+
+test("standalone plugin advertises a host-native HTTPS update channel", async () => {
+  const source = await readFile(pluginUrl, "utf8");
+  assert.match(source, /^\/\/@version 0\.9\.0\.2$/m);
+  assert.match(
+    source,
+    /^\/\/@update-url https:\/\/raw\.githubusercontent\.com\/canister2668\/risu-bg-bridge\/refs\/heads\/main\/plugin\/risu-bg-bridge\.plugin\.js$/m,
+  );
+  const versionLine = source.match(/^\/\/@version[^\n]*/m)?.[0];
+  assert.ok(versionLine);
+  const versionEnd = source.indexOf(versionLine) + versionLine.length;
+  assert.ok(new TextEncoder().encode(source.slice(0, versionEnd)).length <= 512);
+  assert.equal(await readFile(releasePluginUrl, "utf8"), source);
+
+  const hostCompare = (v1: string, v2: string) => {
+    const left = v1.split(".").map(Number);
+    const right = v2.split(".").map(Number);
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+      const a = left[index] || 0;
+      const b = right[index] || 0;
+      if (a !== b) return a > b ? 1 : -1;
+    }
+    return 0;
+  };
+  assert.equal(hostCompare("0.9.0.2", "0.9.0-beta.1"), 1);
+  assert.equal(hostCompare("1.0.0", "0.9.0.2"), 1);
+});
+
+test("dashboard exposes an available update and a missing core patch", async () => {
+  const source = await readFile(pluginUrl, "utf8");
+  let openDashboard: (() => Promise<void>) | undefined;
+  const body = { innerHTML: "" };
+  const elements = new Map<string, { onclick?: () => void }>();
+  const document = {
+    body,
+    getElementById(id: string) {
+      if (!elements.has(id)) elements.set(id, {});
+      return elements.get(id);
+    },
+  };
+  const Risuai = {
+    addProvider: async () => "provider-id",
+    registerSetting: async (_name: string, callback: () => Promise<void>) => {
+      openDashboard = callback;
+      return "setting-id";
+    },
+    nativeFetch: async () => ({
+      status: 206,
+      text: async () => "//@name risu_bg_bridge\n//@version 0.9.0.3\n",
+    }),
+    showContainer: async () => {},
+    hideContainer: async () => {},
+  };
+  await vm.runInNewContext(source, {
+    Risuai, crypto: webcrypto, console, setTimeout, clearTimeout, DOMException, document,
+  });
+  assert.ok(openDashboard);
+  await openDashboard!();
+  assert.match(body.innerHTML, /UPDATE/);
+  assert.match(body.innerHTML, /Version 0\.9\.0\.3 is available/);
+  assert.match(body.innerHTML, /Core bridge not detected/);
+  assert.match(body.innerHTML, /Open adapter guide/);
+});
+
+test("dashboard distinguishes server-provider setup from a missing core patch", async () => {
+  const source = await readFile(pluginUrl, "utf8");
+  let openDashboard: (() => Promise<void>) | undefined;
+  const body = { innerHTML: "" };
+  const document = {
+    body,
+    getElementById: () => ({}),
+  };
+  const Risuai = {
+    addProvider: async () => "provider-id",
+    registerSetting: async (_name: string, callback: () => Promise<void>) => {
+      openDashboard = callback;
+      return "setting-id";
+    },
+    nativeFetch: async () => ({
+      status: 200,
+      text: async () => "//@name risu_bg_bridge\n//@version 0.9.0.2\n",
+    }),
+    showContainer: async () => {},
+    hideContainer: async () => {},
+    backgroundModels: {
+      getCapabilities: async () => ({
+        contractVersion: 1,
+        adapter: { target: "haejeok", version: "b6704+bg1" },
+        features: { tabCloseDurable: true, pluginJobCreation: false, serverProviders: false },
+      }),
+      listJobs: async () => [],
+    },
+  };
+  await vm.runInNewContext(source, {
+    Risuai, crypto: webcrypto, console, setTimeout, clearTimeout, DOMException, document,
+  });
+  assert.ok(openDashboard);
+  await openDashboard!();
+  assert.match(body.innerHTML, /CURRENT/);
+  assert.match(body.innerHTML, /Core bridge detected · setup required/);
+  assert.match(body.innerHTML, /provider registry/);
+  assert.doesNotMatch(body.innerHTML, /Core patch required/);
+});
 
 test("standalone plugin has installable API v3 metadata and uses the host bridge", async () => {
   const source = await readFile(pluginUrl, "utf8");

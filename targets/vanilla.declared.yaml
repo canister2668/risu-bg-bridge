@@ -17,7 +17,7 @@ declaredUpstream:
 
 localChecks:
   - "No exact vanilla source checkout or provenance-pinned vanilla image was available in the beta build environment."
-  - "A server patch is therefore not published for vanilla RisuAI in v0.9.0-beta.1."
+  - "A server patch is therefore not published for vanilla RisuAI in v0.9.0-beta.2."
 
 consequence:
   - "No vanilla lock can be produced from available sources."
