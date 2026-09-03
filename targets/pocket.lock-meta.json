@@ -1,0 +1,36 @@
+{
+  "target": "pocket",
+  "lockFormat": 1,
+  "status": "verified-local",
+  "upstream": {
+    "product": "PocketRisu",
+    "version": "1.10.0",
+    "commit": null,
+    "tag": null
+  },
+  "source": {
+    "kind": "docker-image-extract",
+    "imageRef": "risuai:nodeonly-client-aux-handoff-20260829",
+    "imageId": "sha256:f41477424f0764179d3cd4b6d0761bea5f34f89dee69c76bd362bb9e4561282a",
+    "repoDigest": null,
+    "labelVersion": null,
+    "note": "Local intermediate image built on this host; no registry digest exists for it."
+  },
+  "package": {
+    "name": "pocketrisu",
+    "version": "1.10.0"
+  },
+  "notes": [
+    "Verified 2026-09-03: /app/package.json of image sha256:f4147742 reports pocketrisu@1.10.0, satisfying the AGENTS.md gate that pins the PocketRisu production target to v1.10.0.",
+    "51 files (50 from /app/server/node plus /app/package.json) were extracted with docker create + docker cp + docker rm (the container was never started) and sha256-hashed into INVENTORY.json by scripts/fetch.mjs.",
+    "The extraction was re-run from the image on 2026-09-03 and matched the earlier staging extraction on every file; no drift.",
+    "server.cjs, model-jobs.cjs, bg-worker.cjs, bg-aux.cjs, hypa-bg.cjs and db.cjs match the six hashes individually verified during design-plan review before this lock was written.",
+    "Verified in the locked source: model-jobs.cjs accepts client-supplied UUID job ids with 409-on-reuse but performs no request-fingerprint comparison; auth material is held memory-only; running jobs are marked failed with reason 'server restart' on boot; pending_sends are claimed atomically single-shot; retention rotation keeps unclaimed main jobs first."
+  ],
+  "gaps": [
+    "Upstream commit SHA and tag are unknown: no PocketRisu git checkout exists on this host. upstream.version comes from the image's own package.json, not from upstream VCS, so '1.10.0' is verified as the image's identity but not traced to an upstream commit.",
+    "The pinned image is a local build with no registry repoDigest, so its lineage back to upstream sources cannot be independently verified. This lock therefore pins THIS image as the exact patch target — patches apply to this artifact, not to upstream code.",
+    "Lock tooling does not re-check the docker daemon; it verifies the extracted snapshot hashes. Confirming the source image still exists locally (docker inspect risuai:nodeonly-client-aux-handoff-20260829) is a manual step.",
+    "The missing request-fingerprint idempotency in model-jobs.cjs is a gap in the target itself; the adapter layer documents it rather than the lock pretending the target is contract-complete."
+  ]
+}

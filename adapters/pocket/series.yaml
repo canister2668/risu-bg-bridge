@@ -1,0 +1,865 @@
+series: "pocket-1.10.0-bgbridge"
+target: "pocket"
+lock: "pocket.lock.yaml"
+notes:
+  - "All anchors were byte-verified against the locked snapshot on 2026-09-03 (sha256-pinned by pocket.lock.yaml); round-2 anchors re-verified the same day before this expansion."
+  - "pocket-001 reproduces the truncated-stream guard already proven in build/pocketrisu-1.10-hypav3-budget/patch-bg-worker.mjs."
+  - "pocket-002 registers the bridge v1 wiring on server.cjs: the single authenticated host principal (pocket-host:<instanceId>, the non-secret instance identity the locked source already persists at save/__instance_id and already sends in update-check analytics / compute-offload scopeId), the registerBridgeRoutes call with /proxy2-level auth, and GET /api/risu-bg-bridge/v1/capabilities reporting only capabilities backed by steps 101-104. 1.10.0's auth model has no per-user subject (server-issued HS256 JWT with {iat, exp} and one instance password), so one principal per instance is the honest scope, and it is enforced at the data layer so a job id from another instance is a 404, never a cross-instance leak."
+  - "pocket-101 adds the bridge schema: request_fingerprint/principal_id columns on model_jobs (same try/catch ALTER idiom as the locked file's own migrations, placed before every prepared statement so no statement is prepared against a pre-ALTER schema), plus bg_delivery_leases, bg_aux_acks, and bg_finalize_proofs tables. SECURITY is unchanged: only a sha256 fingerprint digest is persisted — never the URL, headers, or body, so provider credentials stay memory-only exactly as the recorder's own invariant requires."
+  - "pocket-102 is the bridge store + typed wrapper: canonical-request fingerprint (sorted-key JSON over exactly the fields defining the upstream request, headers normalized the same way the recorder forwards them), PUT idempotency with 409 fingerprint-conflict semantics, typed journal events with server-side afterSeq resume, sha256 journal result hashes, durable aux discovery/consumer ACK rows, and delivery leases with monotonically increasing fencing tokens."
+  - "pocket-103 stamps the fingerprint + principal inside createJob's synchronous insert section, so a crash can never leave a bridge row without its fingerprint; the stock POST route never forwards these fields, so stock rows stay NULL and stock behavior is byte-unchanged."
+  - "pocket-104 exports registerBridgeRoutes from createModelJobs."
+  - "Restart recovery stays fail-closed and restartRecovery stays false: reconstructing an approved upstream request after a restart would require persisting the request URL/headers/body, and 1.10.0's own SECURITY invariant keeps provider credentials memory-only. No secret-free reconstruction exists (the journal holds response bytes only), so boot keeps markRunningJobsFailed('server restart') and a re-PUT of the same fingerprint honestly replays the failed row instead of resuming work."
+steps:
+  - id: "pocket-001"
+    kind: "replace"
+    file: "bg-worker.cjs"
+    description: "Fail the background job when the upstream SSE stream closes without a completion signal, instead of persisting a truncated body as a valid response."
+    from: |8-
+                broadcastDelta(); // flush any remaining delta
+
+                // Phase 1 complete — persist the raw LLM output immediately so it's safe
+    to: |8-
+                broadcastDelta(); // flush any remaining delta
+
+                // A provider-side quota/error frame may close an SSE stream without a
+                // completion signal. Never replace a valid chat response with that
+                // partial body: fail the background job and leave the prior response
+                // intact so reroll/retry remains safe.
+                if (upstreamTruncated) {
+                    throw new Error('LLM stream closed before a completion signal; partial output was discarded')
+                }
+
+                // Phase 1 complete — persist the raw LLM output immediately so it's safe
+  - id: "pocket-002"
+    kind: "insert"
+    file: "server.cjs"
+    description: "Wire the risu-bg-bridge v1 surface right after the model-jobs wiring: the single authenticated host principal, the registerBridgeRoutes call with /proxy2-level auth, and the GET /api/risu-bg-bridge/v1/capabilities endpoint reporting exactly the features backed by steps 101-104."
+    at: |8-
+        // in model-jobs.cjs; registers /api/model-jobs* with /proxy2-level auth.
+        const { createModelJobs } = require('./model-jobs.cjs');
+        const modelJobs = createModelJobs({ saveDir: savePath, logger });
+        modelJobs.registerRoutes(app, { auth: checkProxyAuth });
+    position: "after"
+    content: |8-
+
+        // --- risu-bg-bridge v1 (risu-bg-extension kit, series pocket-1.10.0-bgbridge) ---
+        // Principal scoping: 1.10.0 authenticates callers with a server-issued
+        // HS256 JWT whose payload is only {iat, exp} — there is no per-user
+        // subject and one instance password, so the honest authenticated-host
+        // identity is the instance itself. instanceId is already persisted at
+        // save/__instance_id and already used non-secretly (update-check
+        // analytics id, compute-offload scopeId), so every bridge row is
+        // scoped to it and every bridge query filters by it: a job id that
+        // exists on another Pocket instance answers 404 here instead of
+        // leaking cross-instance state.
+        const bgBridgePrincipal = `pocket-host:${instanceId}`;
+        modelJobs.registerBridgeRoutes(app, { auth: checkProxyAuth, principalId: bgBridgePrincipal });
+        app.get('/api/risu-bg-bridge/v1/capabilities', async (req, res) => {
+            if (!await checkProxyAuth(req, res)) return;
+            res.json({
+                contractVersion: 1,
+                target: 'pocket',
+                targetVersion: '1.10.0',
+                pipelineVersion: 'pocket-send/1',
+                features: {
+                    tabCloseDurable: true,
+                    restartRecovery: false,
+                    eventReplay: true,
+                    mainJobs: true,
+                    auxJobs: true,
+                    toolWorkflows: false,
+                    deliveryLease: true,
+                    durableFinalization: false,
+                    serverProviders: false,
+                    browserProviderPersistence: false
+                },
+                // Every key below is backed by a patch step, not by hope:
+                //   putIdempotency / requestFingerprint  pocket-102 (PUT /jobs/:id)
+                //   principalScoping                     pocket-002 + pocket-101/102
+                //   typedEvents / typedResult / resultHash
+                //                                         pocket-102 (journal wrapper)
+                //   auxDiscovery / auxAck                pocket-102 (durable rows)
+                //   deliveryLease                        pocket-102 (fencing tokens)
+                //   finalizeProof                        pocket-102 (proof seam: the
+                //     server verifies the journal resultHash + lease fencing and
+                //     durably records the client-asserted generationId/messageId/
+                //     chatRevision — chat storage is NOT reachable from the job
+                //     relay, so materialization itself stays client-side and
+                //     durableFinalization stays false)
+                //   restartRecovery: 'fail-closed'       reconstructing an approved
+                //     request after restart would persist credentials (memory-only
+                //     by this build's own SECURITY invariant), so boot keeps
+                //     failing running jobs and a re-PUT replays the failed row.
+                bridge: {
+                    version: 1,
+                    putIdempotency: true,
+                    requestFingerprint: 'sha256-canonical-json',
+                    principalScoping: 'single-host-instance',
+                    typedEvents: true,
+                    typedResult: true,
+                    resultHash: 'sha256-journal-bytes',
+                    auxDiscovery: true,
+                    auxAck: true,
+                    deliveryLease: true,
+                    finalizeProof: 'client-asserted-generationId+server-verified-resultHash',
+                    restartRecovery: 'fail-closed-no-secret-persistence'
+                },
+                adapter: {
+                    target: 'pocket',
+                    version: '1.10.0-bgbridge',
+                    kit: 'risu-bg-extension',
+                    series: 'pocket-1.10.0-bgbridge',
+                    routes: 'bridge v1 under /api/risu-bg-bridge/v1; stock create/claim/stream stay unchanged on /api/model-jobs and /api/pending-sends'
+                }
+            });
+        });
+  - id: "pocket-101"
+    kind: "insert"
+    file: "model-jobs.cjs"
+    description: "Add the bridge schema: request_fingerprint + principal_id columns on model_jobs (same try/catch ALTER idiom as the locked file, placed before every prepared statement), plus the bg_delivery_leases, bg_aux_acks, and bg_finalize_proofs tables."
+    at: |8-
+            try {
+                db.exec(`ALTER TABLE model_jobs ADD COLUMN target_origin TEXT`);
+            } catch { /* column already present */ }
+    position: "after"
+    content: |8-
+
+            // ── risu-bg-extension bridge v1 schema (series pocket-1.10.0-bgbridge) ──
+            // The bridge layers PUT idempotency, principal scoping, typed
+            // journal reads, durable aux ACKs, and delivery leases on top of the
+            // recorder. SECURITY is unchanged: the ONLY new request material ever
+            // persisted is the sha256 fingerprint digest computed in pocket-102 —
+            // never the URL, headers, or body, so provider credentials stay
+            // memory-only exactly as the schema comment above requires. The
+            // ALTERs run before every prepared statement below so no statement is
+            // ever compiled against a pre-ALTER schema.
+            try {
+                db.exec(`ALTER TABLE model_jobs ADD COLUMN request_fingerprint TEXT`);
+            } catch { /* column already present */ }
+            try {
+                db.exec(`ALTER TABLE model_jobs ADD COLUMN principal_id TEXT`);
+            } catch { /* column already present */ }
+            // Delivery leases with fencing tokens: acquire bumps a per-job
+            // monotonic token, finalize only accepts the CURRENT unexpired lease.
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS bg_delivery_leases (
+                    job_id TEXT PRIMARY KEY,
+                    lease_id TEXT NOT NULL,
+                    fencing_token INTEGER NOT NULL,
+                    owner TEXT,
+                    expires_at INTEGER NOT NULL,
+                    principal_id TEXT NOT NULL
+                );
+            `);
+            // Durable per-consumer acknowledgements (aux consumer groups). One
+            // row per (job, consumer) so discovery can exclude what a consumer
+            // already took while other consumers still see the job.
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS bg_aux_acks (
+                    job_id TEXT NOT NULL,
+                    consumer_id TEXT NOT NULL,
+                    consumer_group TEXT,
+                    result_hash TEXT,
+                    acked_at INTEGER NOT NULL,
+                    principal_id TEXT NOT NULL,
+                    PRIMARY KEY (job_id, consumer_id)
+                );
+            `);
+            // Finalization proofs: what the server CAN verify (journal sha256,
+            // lease + fencing) plus the client-asserted materialization fields it
+            // cannot (chat storage is not reachable from this relay by design —
+            // the proof row is the seam, durableFinalization stays false).
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS bg_finalize_proofs (
+                    job_id TEXT PRIMARY KEY,
+                    generation_id TEXT,
+                    result_hash TEXT NOT NULL,
+                    lease_id TEXT NOT NULL,
+                    fencing_token INTEGER NOT NULL,
+                    message_id TEXT,
+                    chat_revision INTEGER,
+                    asserted_persisted_at TEXT,
+                    finalized_at INTEGER NOT NULL,
+                    principal_id TEXT NOT NULL
+                );
+            `);
+  - id: "pocket-102"
+    kind: "insert"
+    file: "model-jobs.cjs"
+    description: "Add the bridge store and typed wrapper: canonical request fingerprint, PUT idempotency with 409 fingerprint conflicts, typed journal events with server-side afterSeq resume, journal result hashes, durable aux discovery + consumer ACK, and delivery leases with fencing."
+    at: |8-
+            const PENDING_SEND_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+    position: "after"
+    content: |8-
+
+            // ── risu-bg-extension bridge v1 store (series pocket-1.10.0-bgbridge) ──
+            // All bridge queries filter by principal_id (set by server.cjs's
+            // registerBridgeRoutes call to pocket-host:<instanceId>): a row that
+            // is not under the caller's principal is a 404, never a leak. Stock
+            // POST rows carry NULL principal_id and stay invisible to the
+            // bridge — fail-closed, never guessed.
+            const stmtSetBridgeMeta = db.prepare(`
+                UPDATE model_jobs SET request_fingerprint = ?, principal_id = ? WHERE id = ?
+            `);
+            const stmtListAuxPending = db.prepare(`
+                SELECT * FROM model_jobs
+                WHERE kind = 'aux' AND status IN ('done', 'failed') AND claimed = 0 AND principal_id = ?
+                ORDER BY created_at ASC
+            `);
+            const stmtLeaseGet = db.prepare(`SELECT * FROM bg_delivery_leases WHERE job_id = ?`);
+            const stmtLeasePut = db.prepare(`
+                INSERT OR REPLACE INTO bg_delivery_leases (job_id, lease_id, fencing_token, owner, expires_at, principal_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `);
+            const stmtLeaseRenew = db.prepare(`UPDATE bg_delivery_leases SET expires_at = ? WHERE job_id = ? AND lease_id = ?`);
+            const stmtAckGet = db.prepare(`SELECT * FROM bg_aux_acks WHERE job_id = ? AND consumer_id = ?`);
+            const stmtAckPut = db.prepare(`
+                INSERT INTO bg_aux_acks (job_id, consumer_id, consumer_group, result_hash, acked_at, principal_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `);
+            const stmtProofGet = db.prepare(`SELECT * FROM bg_finalize_proofs WHERE job_id = ?`);
+            const stmtProofPut = db.prepare(`
+                INSERT INTO bg_finalize_proofs
+                    (job_id, generation_id, result_hash, lease_id, fencing_token, message_id, chat_revision, asserted_persisted_at, finalized_at, principal_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+            const BG_BRIDGE_LEASE_DEFAULT_TTL_MS = 60000;
+            const BG_BRIDGE_LEASE_MAX_TTL_MS = 600000;
+            const BG_BRIDGE_EVENTS_DEFAULT_LIMIT_BYTES = 4194304;
+            const BG_BRIDGE_EVENTS_MAX_LIMIT_BYTES = 67108864;
+            const BG_BRIDGE_EVENT_READ_BLOCK = 65536;
+            const BG_BRIDGE_HASH_CACHE_MAX = 4096;
+
+            // Canonical request fingerprint for PUT idempotency: sorted-key JSON
+            // over exactly the fields that define the upstream request the
+            // recorder will make. Headers are normalized with the recorder's own
+            // normalizeUpstreamHeaders, so a retry after a cosmetic header-case
+            // change is the same request, while a rotated provider key is a
+            // different one. Only this sha256 digest is persisted; the raw
+            // headers (which carry provider credentials) stay memory-only.
+            function bridgeCanonicalJson(value) {
+                if (value === null || value === undefined) return 'null';
+                if (Array.isArray(value)) {
+                    return '[' + value.map(bridgeCanonicalJson).join(',') + ']';
+                }
+                if (typeof value === 'object') {
+                    const keys = Object.keys(value).sort();
+                    return '{' + keys.map((k) => JSON.stringify(k) + ':' + bridgeCanonicalJson(value[k])).join(',') + '}';
+                }
+                return JSON.stringify(value);
+            }
+
+            function bridgeRequestFingerprint(arg) {
+                return nodeCrypto.createHash('sha256').update(bridgeCanonicalJson({
+                    targetUrl: typeof arg.targetUrl === 'string' ? arg.targetUrl.trim() : '',
+                    method: 'POST',
+                    headers: normalizeUpstreamHeaders(arg.headers),
+                    body: typeof arg.body === 'string' ? arg.body : null,
+                    chatId: typeof arg.chatId === 'string' ? arg.chatId : '',
+                    generationId: typeof arg.generationId === 'string' ? arg.generationId : null,
+                    adapterKind: typeof arg.adapterKind === 'string' ? arg.adapterKind : null,
+                    model: typeof arg.model === 'string' ? arg.model.slice(0, 128) : null,
+                    kind: arg.kind === 'aux' ? 'aux' : arg.kind === 'background' ? 'background' : 'main',
+                    streaming: !!arg.streaming,
+                    timeoutMs: normalizeTimeoutMs(Number(arg.timeoutMs))
+                })).digest('hex');
+            }
+
+            // Bridge snapshot: the stock row JSON plus the idempotency and
+            // delivery fields only the bridge tracks. deliveryState follows the
+            // contract vocabulary (undelivered / leased / delivered).
+            function bridgeSnapshot(row) {
+                const lease = stmtLeaseGet.get(row.id);
+                const proof = stmtProofGet.get(row.id);
+                const leaseHeld = !!(lease && lease.expires_at > Date.now());
+                const base = rowToJson(row, activeJobs.get(row.id));
+                return {
+                    ...base,
+                    requestFingerprint: row.request_fingerprint ?? null,
+                    principalId: row.principal_id ?? null,
+                    deliveryState: proof ? 'delivered' : leaseHeld ? 'leased' : row.claimed ? 'delivered' : 'undelivered',
+                    lease: leaseHeld ? {
+                        leaseId: lease.lease_id,
+                        ownerClientId: lease.owner ?? undefined,
+                        fencingToken: String(lease.fencing_token),
+                        expiresAt: new Date(lease.expires_at).toISOString()
+                    } : null,
+                    finalizedAt: proof ? new Date(proof.finalized_at).toISOString() : undefined
+                };
+            }
+
+            // sha256 over the journal bytes — the canonical result hash for the
+            // recorder model, where the journal IS the result. Terminal journals
+            // are immutable (status flips only after the final write flushed),
+            // so the digest is cached per (job id, created_at); the created_at
+            // guard invalidates the entry if a deleted job's UUID is re-created.
+            const bridgeHashCache = new Map();
+            async function bridgeJournalHash(row) {
+                const hit = bridgeHashCache.get(row.id);
+                if (hit && hit.createdAt === row.created_at) return hit.hash;
+                const hash = nodeCrypto.createHash('sha256');
+                let fh = null;
+                try {
+                    fh = await fsp.open(journalPath(row.id), 'r');
+                } catch { /* absent journal == empty content */ }
+                if (fh) {
+                    try {
+                        const buf = Buffer.allocUnsafe(BG_BRIDGE_EVENT_READ_BLOCK);
+                        for (;;) {
+                            const { bytesRead } = await fh.read(buf, 0, buf.length, null);
+                            if (!bytesRead) break;
+                            hash.update(buf.subarray(0, bytesRead));
+                        }
+                    } finally {
+                        await fh.close();
+                    }
+                }
+                const hex = hash.digest('hex');
+                if (bridgeHashCache.size >= BG_BRIDGE_HASH_CACHE_MAX) bridgeHashCache.clear();
+                bridgeHashCache.set(row.id, { hash: hex, createdAt: row.created_at });
+                return hex;
+            }
+
+            // Typed snapshot replay over the raw journal (honest typed wrapper):
+            // the journal bytes ARE the provider stream, so each read block
+            // becomes a provider_chunk event whose seq is its end byte offset,
+            // and afterSeq is honored server-side — bytes below it are never
+            // re-sent. Historical state transitions are NOT reconstructed; the
+            // wrapper adds exactly one typed terminal marker (result_ready with
+            // the journal hash, or error) on the final page. Live tailing stays
+            // on the stock raw stream endpoint.
+            async function bridgeReadEvents(row, afterSeq, limitBytes) {
+                const events = [];
+                let bytes = 0;
+                let truncated = false;
+                let fh = null;
+                try {
+                    fh = await fsp.open(journalPath(row.id), 'r');
+                } catch { /* absent journal (failed pre-connect) == empty stream */ }
+                if (fh) {
+                    try {
+                        const buf = Buffer.allocUnsafe(BG_BRIDGE_EVENT_READ_BLOCK);
+                        let offset = afterSeq;
+                        let sent = 0;
+                        for (;;) {
+                            const want = Math.min(buf.length, limitBytes - sent);
+                            if (want <= 0) {
+                                truncated = true;
+                                break;
+                            }
+                            const { bytesRead } = await fh.read(buf, 0, want, offset);
+                            if (!bytesRead) break;
+                            events.push({
+                                seq: offset + bytesRead,
+                                type: 'provider_chunk',
+                                payload: {
+                                    encoding: 'base64',
+                                    byteOffset: offset,
+                                    data: buf.subarray(0, bytesRead).toString('base64')
+                                }
+                            });
+                            offset += bytesRead;
+                            sent += bytesRead;
+                            if (sent >= limitBytes) {
+                                truncated = true;
+                                break;
+                            }
+                        }
+                        try { bytes = (await fh.stat()).size; } catch { bytes = offset; }
+                    } finally {
+                        await fh.close();
+                    }
+                }
+                let final = false;
+                if (TERMINAL_STATUSES.includes(row.status) && !truncated && afterSeq <= bytes) {
+                    final = true;
+                    const markerSeq = Math.max(bytes, afterSeq) + 1;
+                    if (row.status === 'done') {
+                        events.push({
+                            seq: markerSeq,
+                            type: 'result_ready',
+                            payload: { resultHash: await bridgeJournalHash(row), bytes }
+                        });
+                    } else {
+                        events.push({
+                            seq: markerSeq,
+                            type: 'error',
+                            payload: { status: row.status, error: row.error ?? row.status }
+                        });
+                    }
+                }
+                return { events, bytes, final, truncated };
+            }
+
+            // Bridge PUT idempotency: same clientJobId + same canonical
+            // fingerprint replays the existing job WITHOUT re-issuing the
+            // upstream request (200, isNew false); same id + different
+            // fingerprint is a 409; a row the bridge cannot attribute (stock
+            // POST row, or NULL fingerprint) is a fail-closed 409, never a
+            // silent reuse; a row under another principal is a 404.
+            function bridgeReplayOrConflict(principalId, row, fingerprint) {
+                if (row.principal_id !== principalId) {
+                    return { error: 'Job not found', httpStatus: 404 };
+                }
+                if (typeof row.request_fingerprint !== 'string' || row.request_fingerprint === '') {
+                    return {
+                        error: 'Job exists without a bridge fingerprint (stock-created row); PUT idempotency is unavailable for it',
+                        httpStatus: 409,
+                        jobId: row.id
+                    };
+                }
+                if (row.request_fingerprint === fingerprint) {
+                    return { job: bridgeSnapshot(row), isNew: false, httpStatus: 200 };
+                }
+                return { error: 'Request fingerprint mismatch for existing job id', httpStatus: 409, jobId: row.id };
+            }
+
+            function putBridgeJob(principalId, arg) {
+                const jobId = arg.id;
+                if (typeof jobId !== 'string'
+                    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(jobId)) {
+                    return { error: 'Invalid job id', httpStatus: 400 };
+                }
+                const fingerprint = bridgeRequestFingerprint(arg);
+                const existing = stmtGet.get(jobId);
+                if (existing) {
+                    return bridgeReplayOrConflict(principalId, existing, fingerprint);
+                }
+                const result = createJob({ ...arg, bridgeRequestFingerprint: fingerprint, bridgePrincipalId: principalId });
+                if (result.error) {
+                    // createJob's own 409 means either the id raced in (same id:
+                    // resolve to the same idempotency decision a re-PUT would
+                    // make) or the per-chat guard fired (different id:
+                    // propagate the conflict as-is).
+                    if (result.httpStatus === 409 && result.jobId === jobId) {
+                        const raced = stmtGet.get(jobId);
+                        if (raced) return bridgeReplayOrConflict(principalId, raced, fingerprint);
+                    }
+                    return result;
+                }
+                const row = stmtGet.get(jobId);
+                return { job: bridgeSnapshot(row), isNew: true, httpStatus: 201 };
+            }
+
+            // ── delivery lease + fencing ───────────────────────────────────────
+            // Acquire bumps a per-job monotonic fencing token (expired or absent
+            // lease → token = prev + 1); renew extends only the CURRENT unexpired
+            // lease; finalize accepts only the CURRENT unexpired lease AND its
+            // exact token. A stale holder can therefore never finalize over a
+            // newer lease holder's delivery.
+            function bridgeLeaseTtlMs(raw) {
+                const n = Number(raw);
+                if (!Number.isFinite(n) || n <= 0) return BG_BRIDGE_LEASE_DEFAULT_TTL_MS;
+                return Math.min(BG_BRIDGE_LEASE_MAX_TTL_MS, Math.max(1, Math.floor(n)));
+            }
+
+            function acquireBridgeLease(principalId, jobId, owner, ttlMs) {
+                const row = stmtGet.get(jobId);
+                if (!row || row.principal_id !== principalId) return { error: 'Job not found', httpStatus: 404 };
+                if (row.status !== 'done') {
+                    return { error: 'Only a succeeded job can be leased for delivery', httpStatus: 409 };
+                }
+                const lease = stmtLeaseGet.get(jobId);
+                const now = Date.now();
+                if (lease && lease.expires_at > now) {
+                    return {
+                        error: 'An unexpired delivery lease already exists',
+                        httpStatus: 409,
+                        leaseId: lease.lease_id,
+                        fencingToken: String(lease.fencing_token),
+                        expiresAt: new Date(lease.expires_at).toISOString()
+                    };
+                }
+                const fencingToken = (lease ? Number(lease.fencing_token) : 0) + 1;
+                const leaseId = nodeCrypto.randomUUID();
+                const ownerClientId = typeof owner === 'string' && owner !== '' ? owner : leaseId;
+                const expiresAt = now + bridgeLeaseTtlMs(ttlMs);
+                stmtLeasePut.run(jobId, leaseId, fencingToken, ownerClientId, expiresAt, principalId);
+                return {
+                    lease: {
+                        leaseId,
+                        ownerClientId,
+                        fencingToken: String(fencingToken),
+                        expiresAt: new Date(expiresAt).toISOString()
+                    }
+                };
+            }
+
+            function renewBridgeLease(principalId, jobId, leaseId, owner, ttlMs) {
+                const row = stmtGet.get(jobId);
+                if (!row || row.principal_id !== principalId) return { error: 'Job not found', httpStatus: 404 };
+                const lease = stmtLeaseGet.get(jobId);
+                if (!lease || lease.lease_id !== leaseId || lease.principal_id !== principalId) {
+                    return { error: 'Lease not found', httpStatus: 404 };
+                }
+                const now = Date.now();
+                if (lease.expires_at <= now) {
+                    return { error: 'Lease expired; acquire a new one', httpStatus: 409, fencingToken: String(lease.fencing_token) };
+                }
+                if (typeof owner === 'string' && owner !== '' && lease.owner !== null && lease.owner !== owner) {
+                    return { error: 'Lease owner mismatch', httpStatus: 409 };
+                }
+                const expiresAt = now + bridgeLeaseTtlMs(ttlMs);
+                stmtLeaseRenew.run(expiresAt, jobId, leaseId);
+                return {
+                    lease: {
+                        leaseId: lease.lease_id,
+                        ownerClientId: lease.owner ?? lease.lease_id,
+                        fencingToken: String(lease.fencing_token),
+                        expiresAt: new Date(expiresAt).toISOString()
+                    }
+                };
+            }
+
+            // Finalization proof seam: verify everything the relay CAN prove
+            // (lease + fencing + journal hash), durably record the rest as the
+            // client's assertion (messageId, chatRevision, persistedAt) plus the
+            // row's own generationId. Chat storage is not reachable from this
+            // module, so the proof row is the seam — durableFinalization stays
+            // false and the capabilities endpoint says exactly that.
+            async function finalizeBridgeJob(principalId, jobId, body) {
+                const row = stmtGet.get(jobId);
+                if (!row || row.principal_id !== principalId) return { error: 'Job not found', httpStatus: 404 };
+                if (row.status !== 'done') {
+                    return { error: 'Only a succeeded job can be finalized', httpStatus: 409 };
+                }
+                const proof = body && typeof body === 'object' ? body.materializationProof : null;
+                if (!proof || typeof proof !== 'object' || Array.isArray(proof)
+                    || typeof proof.messageId !== 'string' || proof.messageId === ''
+                    || !Number.isFinite(Number(proof.chatRevision))
+                    || typeof proof.persistedAt !== 'string' || proof.persistedAt === '') {
+                    return {
+                        error: 'materializationProof requires messageId, chatRevision and persistedAt',
+                        httpStatus: 400
+                    };
+                }
+                const leaseId = typeof body.leaseId === 'string' ? body.leaseId : '';
+                if (leaseId === '') return { error: 'leaseId is required', httpStatus: 400 };
+                if (body.fencingToken === undefined || body.fencingToken === null || body.fencingToken === '') {
+                    return { error: 'fencingToken is required', httpStatus: 400 };
+                }
+                const fencingToken = String(body.fencingToken);
+                const lease = stmtLeaseGet.get(jobId);
+                if (!lease || lease.lease_id !== leaseId) {
+                    return { error: 'Lease not found', httpStatus: 404 };
+                }
+                const now = Date.now();
+                if (lease.expires_at <= now) {
+                    return {
+                        error: 'Lease expired; finalization refused',
+                        httpStatus: 409,
+                        currentFencingToken: String(lease.fencing_token)
+                    };
+                }
+                if (String(lease.fencing_token) !== fencingToken) {
+                    return {
+                        error: 'Fencing token mismatch (stale lease)',
+                        httpStatus: 409,
+                        currentFencingToken: String(lease.fencing_token)
+                    };
+                }
+                const resultHash = await bridgeJournalHash(row);
+                if (typeof proof.resultHash === 'string' && proof.resultHash !== '' && proof.resultHash !== resultHash) {
+                    return { error: 'Result hash mismatch against the journal', httpStatus: 409, resultHash };
+                }
+                const existing = stmtProofGet.get(jobId);
+                if (existing) {
+                    if (existing.lease_id === leaseId && existing.result_hash === resultHash) {
+                        return {
+                            jobId,
+                            status: 'completed',
+                            resultHash,
+                            finalizedAt: new Date(existing.finalized_at).toISOString(),
+                            replayed: true
+                        };
+                    }
+                    return { error: 'Job already finalized with a different proof', httpStatus: 409 };
+                }
+                const finalizedAt = Date.now();
+                stmtProofPut.run(
+                    jobId,
+                    row.generation_id ?? null,
+                    resultHash,
+                    leaseId,
+                    Number(lease.fencing_token),
+                    proof.messageId,
+                    Math.floor(Number(proof.chatRevision)),
+                    proof.persistedAt,
+                    finalizedAt,
+                    principalId
+                );
+                stmtClaim.run(jobId);
+                return {
+                    jobId,
+                    status: 'completed',
+                    resultHash,
+                    finalizedAt: new Date(finalizedAt).toISOString(),
+                    replayed: false
+                };
+            }
+
+            // Durable consumer ACK: one row per (job, consumer). The hash, when
+            // supplied, must match the journal — an ACK is a claim that the
+            // consumer really consumed THIS result. Re-ACK with the same hash
+            // is idempotent; a different hash is a 409.
+            async function ackBridgeJob(principalId, jobId, body) {
+                const row = stmtGet.get(jobId);
+                if (!row || row.principal_id !== principalId) return { error: 'Job not found', httpStatus: 404 };
+                if (row.status !== 'done' && row.status !== 'failed') {
+                    return { error: 'Only a terminal job can be acknowledged', httpStatus: 409 };
+                }
+                const consumerId = body && typeof body.consumerId === 'string' ? body.consumerId.trim() : '';
+                if (consumerId === '' || consumerId.length > 256) {
+                    return { error: 'consumerId is required (max 256 chars)', httpStatus: 400 };
+                }
+                const consumerGroup = body && typeof body.consumerGroup === 'string' && body.consumerGroup !== ''
+                    ? body.consumerGroup.slice(0, 256) : null;
+                const providedHash = body && typeof body.resultHash === 'string' && body.resultHash !== ''
+                    ? body.resultHash : null;
+                if (providedHash !== null) {
+                    const resultHash = await bridgeJournalHash(row);
+                    if (providedHash !== resultHash) {
+                        return { error: 'Result hash mismatch against the journal', httpStatus: 409, resultHash };
+                    }
+                }
+                const existing = stmtAckGet.get(jobId, consumerId);
+                if (existing) {
+                    if (existing.result_hash === null || existing.result_hash === providedHash) {
+                        return { success: true, duplicate: true };
+                    }
+                    return { error: 'Already acknowledged with a different result hash', httpStatus: 409 };
+                }
+                stmtAckPut.run(jobId, consumerId, consumerGroup, providedHash, Date.now(), principalId);
+                stmtClaim.run(jobId);
+                return { success: true, duplicate: false };
+            }
+
+            // Durable aux discovery: terminal, un-ACKed aux jobs under this
+            // principal, oldest first. `consumerId` excludes what that consumer
+            // already acknowledged, so several consumers can drain one queue.
+            function listBridgeAuxPending(principalId, consumerId) {
+                const rows = stmtListAuxPending.all(principalId);
+                const filterConsumer = typeof consumerId === 'string' && consumerId !== '' ? consumerId : null;
+                return rows
+                    .filter((auxRow) => filterConsumer === null || !stmtAckGet.get(auxRow.id, filterConsumer))
+                    .map(bridgeSnapshot);
+            }
+
+            // Typed result read: the journal hash plus the recorder metadata the
+            // client needs to consume it. Payload bytes stay on the journal
+            // stream — this endpoint is the hash + receipt, not a body copy.
+            async function bridgeResult(principalId, jobId) {
+                const row = stmtGet.get(jobId);
+                if (!row || row.principal_id !== principalId) return { error: 'Job not found', httpStatus: 404 };
+                if (row.status !== 'done' && row.status !== 'failed') {
+                    return { error: 'Job is still running', httpStatus: 409 };
+                }
+                return {
+                    jobId,
+                    status: row.status,
+                    resultHash: await bridgeJournalHash(row),
+                    bytes: row.bytes,
+                    contentType: row.content_type ?? undefined,
+                    upstreamStatus: row.upstream_status ?? undefined,
+                    generationId: row.generation_id ?? undefined,
+                    error: row.error ?? undefined
+                };
+            }
+
+            // Express wiring. `auth(req, res)` behaves like checkProxyAuth;
+            // `principalId` is the authenticated host principal from server.cjs
+            // and must be non-empty — the bridge refuses to run unscoped.
+            function registerBridgeRoutes(app, { auth, principalId }) {
+                if (typeof principalId !== 'string' || principalId === '') {
+                    throw new TypeError('registerBridgeRoutes requires a non-empty principalId');
+                }
+                const wrap = (handler) => async (req, res) => {
+                    try {
+                        if (!await auth(req, res)) return;
+                        await handler(req, res);
+                    } catch (err) {
+                        if (opts.logger) opts.logger.error('[risu-bg-bridge] route crashed', err);
+                        else console.error('[risu-bg-bridge] route crashed', err);
+                        if (!res.headersSent) res.status(500).send({ error: 'Internal Server Error' });
+                    }
+                };
+
+                app.put('/api/risu-bg-bridge/v1/jobs/:id', wrap(async (req, res) => {
+                    const result = putBridgeJob(principalId, {
+                        id: req.params.id,
+                        targetUrl: req.body?.targetUrl,
+                        method: req.body?.method,
+                        headers: req.body?.headers,
+                        body: req.body?.body,
+                        chatId: req.body?.chatId,
+                        generationId: req.body?.generationId,
+                        adapterKind: req.body?.adapterKind,
+                        model: req.body?.model,
+                        kind: req.body?.kind,
+                        streaming: !!req.body?.streaming,
+                        timeoutMs: req.body?.timeoutMs
+                    });
+                    if (result.error) {
+                        res.status(result.httpStatus).send({ error: result.error, jobId: result.jobId });
+                        return;
+                    }
+                    res.status(result.httpStatus).send({ job: result.job, isNew: result.isNew });
+                }));
+
+                app.get('/api/risu-bg-bridge/v1/jobs/:id', wrap(async (req, res) => {
+                    const row = stmtGet.get(req.params.id);
+                    if (!row || row.principal_id !== principalId) {
+                        res.status(404).send({ error: 'Job not found' });
+                        return;
+                    }
+                    res.send(bridgeSnapshot(row));
+                }));
+
+                app.get('/api/risu-bg-bridge/v1/jobs/:id/events', wrap(async (req, res) => {
+                    const row = stmtGet.get(req.params.id);
+                    if (!row || row.principal_id !== principalId) {
+                        res.status(404).send({ error: 'Job not found' });
+                        return;
+                    }
+                    const afterSeqRaw = req.query.afterSeq === undefined ? '0' : String(req.query.afterSeq);
+                    if (!/^\d+$/.test(afterSeqRaw) || Number(afterSeqRaw) > Number.MAX_SAFE_INTEGER) {
+                        res.status(400).send({ error: 'afterSeq must be a non-negative integer byte offset' });
+                        return;
+                    }
+                    const limitRaw = req.query.limit === undefined
+                        ? String(BG_BRIDGE_EVENTS_DEFAULT_LIMIT_BYTES)
+                        : String(req.query.limit);
+                    if (!/^\d+$/.test(limitRaw) || Number(limitRaw) < 1) {
+                        res.status(400).send({ error: 'limit must be a positive integer byte budget' });
+                        return;
+                    }
+                    const limitBytes = Math.min(Number(limitRaw), BG_BRIDGE_EVENTS_MAX_LIMIT_BYTES);
+                    const page = await bridgeReadEvents(row, Number(afterSeqRaw), limitBytes);
+                    res.send({
+                        jobId: row.id,
+                        status: row.status,
+                        chatId: row.chat_id,
+                        generationId: row.generation_id ?? undefined,
+                        ...page
+                    });
+                }));
+
+                app.get('/api/risu-bg-bridge/v1/jobs/:id/result', wrap(async (req, res) => {
+                    const result = await bridgeResult(principalId, req.params.id);
+                    if (result.error) {
+                        res.status(result.httpStatus).send(result);
+                        return;
+                    }
+                    res.send(result);
+                }));
+
+                app.post('/api/risu-bg-bridge/v1/jobs/:id/lease', wrap(async (req, res) => {
+                    const result = acquireBridgeLease(
+                        principalId,
+                        req.params.id,
+                        req.body?.ownerClientId,
+                        req.body?.ttlMs
+                    );
+                    if (result.error) {
+                        res.status(result.httpStatus).send(result);
+                        return;
+                    }
+                    res.send(result.lease);
+                }));
+
+                app.post('/api/risu-bg-bridge/v1/jobs/:id/lease/:leaseId/renew', wrap(async (req, res) => {
+                    const result = renewBridgeLease(
+                        principalId,
+                        req.params.id,
+                        req.params.leaseId,
+                        req.body?.ownerClientId,
+                        req.body?.ttlMs
+                    );
+                    if (result.error) {
+                        res.status(result.httpStatus).send(result);
+                        return;
+                    }
+                    res.send(result.lease);
+                }));
+
+                app.post('/api/risu-bg-bridge/v1/jobs/:id/finalize', wrap(async (req, res) => {
+                    const result = await finalizeBridgeJob(principalId, req.params.id, req.body);
+                    if (result.error) {
+                        res.status(result.httpStatus).send(result);
+                        return;
+                    }
+                    res.send(result);
+                }));
+
+                app.post('/api/risu-bg-bridge/v1/jobs/:id/ack', wrap(async (req, res) => {
+                    const result = await ackBridgeJob(principalId, req.params.id, req.body);
+                    if (result.error) {
+                        res.status(result.httpStatus).send(result);
+                        return;
+                    }
+                    res.send(result);
+                }));
+
+                app.get('/api/risu-bg-bridge/v1/aux/pending', wrap(async (req, res) => {
+                    const consumer = typeof req.query.consumer === 'string' ? req.query.consumer : '';
+                    res.send({ jobs: listBridgeAuxPending(principalId, consumer) });
+                }));
+            }
+  - id: "pocket-103"
+    kind: "replace"
+    file: "model-jobs.cjs"
+    description: "Stamp the bridge fingerprint + principal inside createJob's synchronous insert section (same tick as the INSERT, before the job becomes visible), so a crash can never leave a bridge row without its fingerprint. The stock POST route never forwards these fields, so stock rows stay NULL and stock behavior is unchanged."
+    from: |8-
+                stmtInsert.run(
+                    jobId,
+                    chatId,
+                    typeof arg.generationId === 'string' ? arg.generationId : null,
+                    typeof arg.adapterKind === 'string' ? arg.adapterKind : null,
+                    typeof arg.model === 'string' ? arg.model.slice(0, 128) : null,
+                    parsedTarget.origin + parsedTarget.pathname,
+                    kind,
+                    arg.streaming ? 1 : 0,
+                    Date.now()
+                );
+                activeJobs.set(jobId, job);
+    to: |8-
+                stmtInsert.run(
+                    jobId,
+                    chatId,
+                    typeof arg.generationId === 'string' ? arg.generationId : null,
+                    typeof arg.adapterKind === 'string' ? arg.adapterKind : null,
+                    typeof arg.model === 'string' ? arg.model.slice(0, 128) : null,
+                    parsedTarget.origin + parsedTarget.pathname,
+                    kind,
+                    arg.streaming ? 1 : 0,
+                    Date.now()
+                );
+                // risu-bg-extension bridge v1 (series pocket-1.10.0-bgbridge):
+                // stamp the PUT idempotency fingerprint + principal in the SAME
+                // synchronous section as the insert, so a crash can never leave a
+                // bridge row without its fingerprint (the bridge fail-closes on
+                // fingerprint-less rows instead of guessing). Only the bridge PUT
+                // path passes these fields — the stock POST route never forwards
+                // them, so stock rows stay NULL and stock behavior is unchanged.
+                if (arg.bridgeRequestFingerprint || arg.bridgePrincipalId) {
+                    stmtSetBridgeMeta.run(
+                        typeof arg.bridgeRequestFingerprint === 'string' ? arg.bridgeRequestFingerprint : null,
+                        typeof arg.bridgePrincipalId === 'string' ? arg.bridgePrincipalId : null,
+                        jobId
+                    );
+                }
+                activeJobs.set(jobId, job);
+  - id: "pocket-104"
+    kind: "replace"
+    file: "model-jobs.cjs"
+    description: "Export registerBridgeRoutes from createModelJobs so server.cjs can wire the bridge routes with the authenticated host principal."
+    from: |8-
+            return {
+                registerRoutes,
+                createJob,
+    to: |8-
+            return {
+                registerRoutes,
+                registerBridgeRoutes,
+                createJob,

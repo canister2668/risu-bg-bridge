@@ -1,0 +1,27 @@
+# Declared-only target record: Haejeok (ubfaole9/risuai).
+#
+# This is NOT a Pocket-style image lock. The registry image identity below was
+# verified live with docker inspect on 2026-09-03. The public beta also ships a
+# source patch under adapters/haejeok, pinned to its exact git baseline.
+
+target: "haejeok"
+recordFormat: "declared-1"
+status: "declared-only"
+
+verifiedImage:
+  imageRef: "ubfaole9/risuai:latest"
+  imageId: "sha256:c81dca0cb949877e890824293de6f7c072f164fcb5bee830042517180667494a"
+  repoDigest: "ubfaole9/risuai@sha256:a772a278c0f010ca0713685185064da10be39f7f77e1aca14661dd8f860e9b64"
+  labelVersion: "b6704"
+  labelSource: "https://github.com/nevaeh5379/HaejeokRisuai"
+  verifiedAt: "2026-09-03"
+
+declaredUpstream:
+  product: "HaejeokRisuai"
+  patchedVersion: "b6704+bg1"
+  sourceCommit: "0329f44199e93103ba07a247df5e831173f02039"
+  note: "The beta patch is scoped to this exact b6704 source commit. It is not claimed compatible with later releases."
+
+consequence:
+  - "No Pocket-style haejeok lock exists; generic patch/apply tooling still refuses target 'haejeok' with UnverifiableLockError."
+  - "Use adapters/haejeok/haejeok-b6704-bg1.patch only after verifying the exact source commit and running git apply --check."

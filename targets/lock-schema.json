@@ -1,0 +1,99 @@
+{
+  "schemaFormat": "risu-bg-lock/1",
+  "description": "Mini-schema for risu-bg-extension target lock files (targets/*.lock.yaml). Enforced at runtime by scripts/lib/lock.mjs. Any lock content this schema cannot prove is a hard error (fail closed), never a warning.",
+  "root": {
+    "type": "map",
+    "required": [
+      "target",
+      "lockFormat",
+      "status",
+      "upstream",
+      "source",
+      "package",
+      "files",
+      "notes",
+      "gaps"
+    ],
+    "allowUnknown": false,
+    "properties": {
+      "target": {
+        "type": "enum",
+        "values": ["vanilla", "haejeok", "pocket"]
+      },
+      "lockFormat": { "type": "const", "value": 1 },
+      "status": {
+        "type": "enum",
+        "values": ["verified-local", "declared-only", "partial"],
+        "doc": "verified-local: every file hash was computed from an exact local extraction of this exact upstream version. declared-only: no local source exists; nothing is verifiable and every tool must refuse. partial: some material verified, some declared; tools must refuse."
+      },
+      "upstream": {
+        "type": "map",
+        "required": ["product", "version", "commit", "tag"],
+        "allowUnknown": false,
+        "properties": {
+          "product": { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "minLength": 1 },
+          "commit": {
+            "type": "string|null",
+            "pattern": "^[0-9a-f]{40}$",
+            "doc": "Full 40-char upstream commit SHA, or null when no upstream git checkout was available to verify it. Never a short hash or a guess."
+          },
+          "tag": { "type": "string|null", "minLength": 1 }
+        }
+      },
+      "source": {
+        "type": "map",
+        "required": ["kind", "imageRef"],
+        "allowUnknown": false,
+        "properties": {
+          "kind": {
+            "type": "enum",
+            "values": ["docker-image-extract", "git-checkout", "unverified"]
+          },
+          "imageRef": { "type": "string|null", "minLength": 1 },
+          "imageId": {
+            "type": "string|null",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "doc": "Local image config digest (docker inspect Image). A locally built image has no repoDigest; this ID pins the exact local build instead."
+          },
+          "repoDigest": {
+            "type": "string|null",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "doc": "Registry manifest digest (docker inspect RepoDigests). Null for local builds or unverified pulls."
+          },
+          "labelVersion": { "type": "string|null", "minLength": 1 },
+          "note": { "type": "string|null" }
+        }
+      },
+      "package": {
+        "type": "map",
+        "required": ["name", "version"],
+        "allowUnknown": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "minLength": 1 }
+        }
+      },
+      "files": {
+        "type": "map",
+        "requiredKeysNonEmpty": true,
+        "keyPattern": "^[A-Za-z0-9_.][A-Za-z0-9_./ -]*$",
+        "valueSchema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "doc": "sha256 hex digest of the pristine extracted file."
+        }
+      },
+      "notes": {
+        "type": "list",
+        "itemSchema": { "type": "string", "minLength": 1 },
+        "doc": "Verified observations, each phrased so it remains true or the lock must be rewritten."
+      },
+      "gaps": {
+        "type": "list",
+        "itemSchema": { "type": "string", "minLength": 1 },
+        "doc": "Source-dependent gaps that remain unverified. Honest reporting; a gap never blocks a lock from being valid, but any gap that touches identity must force status below verified-local."
+      }
+    }
+  }
+}

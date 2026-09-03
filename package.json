@@ -1,0 +1,35 @@
+{
+  "name": "risu-bg-bridge",
+  "version": "0.9.0-beta.1",
+  "description": "RisuAI Background Execution Extension",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/canister2668/risu-bg-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/canister2668/risu-bg-bridge/issues"
+  },
+  "homepage": "https://github.com/canister2668/risu-bg-bridge#readme",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "kit:typecheck": "tsc -p kit.tsconfig.json",
+    "kit:verify": "node scripts/verify.mjs --target pocket",
+    "plugin:check": "node --check plugin/risu-bg-bridge.plugin.js"
+  },
+  "keywords": [
+    "risuai",
+    "background-execution",
+    "durable-workflow",
+    "extension"
+  ],
+  "author": "canister2668",
+  "license": "GPL-3.0-only",
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.1",
+    "@types/node": "^20.11.24"
+  }
+}

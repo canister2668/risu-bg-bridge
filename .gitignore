@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+generated/
+
+# targets/cache holds EXTRACTED THIRD-PARTY SOURCE (PocketRisu 1.10.0 image
+# contents, sha256-pinned by targets/*.lock.yaml). It is local verification
+# material for the fail-closed patch tooling in scripts/ — never a
+# distributable artifact of this repo. Build contexts produced by
+# scripts/build.mjs contain only patched files + Dockerfile + manifest, and
+# must be written outside this tree (the tool refuses --out inside the cache).
+targets/cache/
+
+# Adapter patch outputs and Docker build contexts (write these to a scratch
+# directory outside the repo; this guard exists in case one is ever created
+# here by mistake).
+*.patched/
+build-context/

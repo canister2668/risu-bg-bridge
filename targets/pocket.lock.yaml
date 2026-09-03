@@ -1,0 +1,87 @@
+target: "pocket"
+lockFormat: 1
+status: "verified-local"
+upstream:
+  "product": "PocketRisu"
+  "version": "1.10.0"
+  "commit": null
+  "tag": null
+source:
+  "kind": "docker-image-extract"
+  "imageRef": "risuai:nodeonly-client-aux-handoff-20260829"
+  "imageId": "sha256:f41477424f0764179d3cd4b6d0761bea5f34f89dee69c76bd362bb9e4561282a"
+  "repoDigest": null
+  "labelVersion": null
+  "note": "Local intermediate image built on this host; no registry digest exists for it."
+package:
+  "name": "pocketrisu"
+  "version": "1.10.0"
+files:
+  "asset-file-store-db.test.ts": 205aca32af17bba019b2f24146fdfd48d7b35c534905128234355a25381cd294
+  "asset-file-store.cjs": 35fe5f6016994efa221133a09e0d5510f796506751e38813100be5ee32f45ec5
+  "asset-file-store.test.ts": 1e850dbae7761b73db52d2e42006d62ccf7b14b7a7ee5436f31dea9a6ac66671
+  "bg-aux.cjs": 1a4b74c2d53da1bd3dc3356c5da112e360468a0b84d791f8c6cddcc55c445970
+  "bg-worker.cjs": 4ee2a23251540df67c585667ecab593aa2100bfbf49e4b2afdae99e740724193
+  "bg-worker.test.ts": 8049fe3cbcfb0a0f24e199480f66216141f890d459ac2801faf90b8eda2b3dc1
+  "chunkStore.cjs": feab802c6549fe52db076d932615f146e059e40998c223c45bf63f001aa29892
+  "chunkStore.test.ts": 87a7dedce8cb5b0a1c914453caeada3ae392ca02d8a02e13e13863230b9101fc
+  "compute-offload-routes.cjs": f5c0c14f510f40992bffc8f95146e1c7ce4992151cc26748a80b4d188c1f3576
+  "compute-offload-routes.test.ts": 60c7a52402d7449146ede1b3f4e8bd478b22676d060bce1ea28616a2d6015fe3
+  "copilot-image.cjs": 30a577eda2d3d817ae7a9c3134f567a07496a6e1aeeb8ccfe75a552404b32e0b
+  "db.cjs": ed3f6c220e2e4e5ae2f271a3156bd117978deba4b143beb6957c58bafb499eb9
+  "hypa-bg.cjs": 404deff008f25c0b4925e8911640cdcabeb31983320f7e455e5b02ffd30bd2a1
+  "logs.cjs": 4d9f535dcece1684364e991d61b258c509ffb6c89f635827969d8b0af5a01fc6
+  "loreMatch.cjs": 68c3eacaed0348a4d31a057b3dadf471f58b55b749c579adfa37caee308b553d
+  "loreMatch.test.ts": f0e107ecfd5c43c1d7f6fff6d94efc0aaa2b690088401382f1fc4b21291e07e3
+  "loreResolve.cjs": 8ecfd7b53757c60b19172b459d16213c0e92694bd57509f71dd6561a3ba9c982
+  "loreResolve.test.ts": f86de98b908a3233ecc1af720dec70af538ae960d71e89b56293cdb5f38a2bff
+  "lua-runtime/luaAsyncBridge.cjs": 8000572aee3f062468969bded97842bd35b69357c6e45d32eaeca65071ef7934
+  "lua-runtime/luaBridge.cjs": ec8f5a12e52eef7b6ebae12334ac33194f0111e2c70e889171678ffe5a8219cf
+  "lua-runtime/luaCodeWrapper.cjs": 1f89ba5c3b172561a5ddfabd9c4c03d3f1b194bbf54d0fe476ec35603d1dbdf7
+  "lua-runtime/luaRunner.cjs": c136c857d9e4951665fbeed5bbffa666f2c17c74b206c2153fd35fb5d45be3b3
+  "lua-runtime/luaSyncState.cjs": 8996546da68c5b9f81b6b50469f61c57b8b84e046f47042db7f32ecd65d9fa79
+  "lua-runtime/luaWasmoon.cjs": 2f27e6e471d4aab72d970e0e2dca273256cd788cd4b5c5103af32b428b779cc9
+  "model-jobs.cjs": 607e3c609be46ce6078dda2045f095cd5e8dffb1aae8632e71313fb455c33fc5
+  "model-jobs.test.ts": 9906c1d967461edc8d172b4f163827681803581df1de67eb7fb4cc036abcb062
+  "package.json": b3f6521ea8e5513f07d710870722d51f144ad8f6e0b933c8694cd46547ceea12
+  "readme.md": 8d6a4401f6100877c9f383cf2f0b05c068da906668896a34d97f1de6ace694e2
+  "request-logs.cjs": 1de034b7f61d1b26f863f72e0165d9c2998157741feb385714f7073809fc9d07
+  "request-logs.test.ts": 29f954551c5da614b2ac395b69d4b691b147634e825a0b69b3646c202f93bc49
+  "risu-db.cjs": 9611d48599a1644afb203ca38f48c1fb688d0fd28d0ebaedc702e7a4d72d179e
+  "server-router.cjs": a65a0a64e1bb261517c6c73ce9cdbb23b1ad37c86860fc0eafd566dec65b083f
+  "server.cjs": 5b27f2a69df9b866503f62d3705730120c46bde5b679d03eb880ba17924f1cf8
+  "session-lock.cjs": 3580c052fbf4eb25ff027d576ec67df21c56c368f3559e26b73c1fb933a79b8d
+  "session-lock.test.ts": 37066eae6f3aff2b758dccbd63e4d07df51dd3d3a5b6cf84b659d9b440a27c1d
+  "sse-events.cjs": d83e768d793bc4eebff694a5a3f0d58dec602766ba99db0e62f4c65d3c8a1f82
+  "ssl/Generate Certificate.bat": 742fb55c81b16b5e5c44256cb0c214730fbc570bc5e4213c1bd4e33308d8d77e
+  "ssl/Generate Certificate.sh": 3933ff2a31050931787a462271282c841568e71145bc27a355aa8d8161954f6f
+  "ssl/ca.conf": 7df2399ebe6202bee9770f5b36b248e2c72cf4a464e5cc2e011e659074a4568c
+  "ssl/server.conf": 2bdfbdd3184694ca478e0f969b9ef7a2707bb4b4d2da72da433af3fdbf672a52
+  "structured-db-routes.cjs": f730f273009e0654180f18fcf8c69bb39c02dfeaa2a0273b24ef4a55e0212edd
+  "structured-db-routes.test.ts": c0023e1d9a51d136451df80aa8aa214a28141bb0eed96467a7beb705fd1ba2dd
+  "structured-migration.cjs": 58ffa8b5deae19a9fd1907e62bc9e3ac02ed51684cb95d48e73969e1e8fc0b5e
+  "structured-migration.test.ts": cce39b094953dc48ec75e366c399c98edd1d86575673baa79a820c55e4ea5ae5
+  "sync-events.cjs": 8b6a50372942a308f2615f199f3790dba6fb4687d0c773aae2c11f0d927537f0
+  "sync-events.test.ts": 0c8c1a3db587ed4cc8236c6d1dd5d8aa183de29cbc64ae21fed98476d5a55f1e
+  "tokenizeCount.cjs": 77608bc45e19a040b1877e62d2f6eeaca785d85c12190deb81c06ae5f87cfb64
+  "tokenizeCount.test.ts": 3e4e80b969df0cc6ac4a3e93cb1aedabd7161f5a5b7d642f0a4c8dbea5cf5d5b
+  "utils.cjs": 3885a7f152d6efd99e6a9ec686f2581c975a671d29fe7227f260b2a0e7fcfcac
+  "vectorIndex.cjs": d7f336abef15b005013a727c342a48ba3a8a823042713ff59e7e5209ef54d7f8
+  "vectorIndex.test.ts": fa8a678437a69dc9734b3122abba095301fd6e8c2a42fc0e782111117c051c78
+notes:
+  - "Verified 2026-09-03: /app/package.json of image sha256:f4147742 reports pocketrisu@1.10.0, satisfying the AGENTS.md gate that pins the PocketRisu production target to v1.10.0."
+  - "51 files (50 from /app/server/node plus /app/package.json) were extracted with docker create + docker cp + docker rm (the container was never started) and sha256-hashed into INVENTORY.json by scripts/fetch.mjs."
+  - "The extraction was re-run from the image on 2026-09-03 and matched the earlier staging extraction on every file; no drift."
+  - "server.cjs, model-jobs.cjs, bg-worker.cjs, bg-aux.cjs, hypa-bg.cjs and db.cjs match the six hashes individually verified during design-plan review before this lock was written."
+  - "Verified in the locked source: model-jobs.cjs accepts client-supplied UUID job ids with 409-on-reuse but performs no request-fingerprint comparison; auth material is held memory-only; running jobs are marked failed with reason 'server restart' on boot; pending_sends are claimed atomically single-shot; retention rotation keeps unclaimed main jobs first."
+  - "Round 2 (2026-09-03): the kit's patch series now adds server-side PUT idempotency with a canonical sha256 request fingerprint (adapters/pocket/series.yaml steps pocket-101..pocket-104) on top of this target. The target itself is unchanged and still lacks fingerprint idempotency natively; every hash below still describes the unpatched artifact."
+  - "Round-2 principal model (verified in the locked source): 1.10.0 authenticates with a server-issued HS256 JWT whose payload is only {iat, exp} plus a single instance password — there is no per-user subject. The only existing non-secret host identity is instanceId, already persisted at save/__instance_id and already used by update-check analytics (id) and compute-offload (scopeId). The bridge therefore scopes every row to the single principal pocket-host:<instanceId> and fails closed (404) on any row not under it; stock POST rows carry NULL principal and stay invisible to the bridge."
+  - "Round-2 restart-recovery decision (fail-closed, reported false): reconstructing an approved request after a restart would require persisting the target URL, headers, or body — and the headers carry provider credentials that this target deliberately keeps memory-only per its own schema comment. The journal holds response bytes only, so no secret-free reconstruction exists. Boot keeps markRunningJobsFailed('server restart'); a re-PUT of the same fingerprint replays the failed row (200, isNew false) instead of resuming. restartRecovery stays false everywhere."
+  - "Round-2 finalization seam (durableFinalization stays false): chat storage is not reachable from the model-jobs relay, so the series adds a proof SEAM, not a materialization ledger — the server verifies the journal sha256 resultHash plus the unexpired lease and exact fencing token, and durably records the client-asserted generationId/messageId/chatRevision/persistedAt. Materialization itself remains client-side."
+gaps:
+  - "Upstream commit SHA and tag are unknown: no PocketRisu git checkout exists on this host. upstream.version comes from the image's own package.json, not from upstream VCS, so '1.10.0' is verified as the image's identity but not traced to an upstream commit."
+  - "The pinned image is a local build with no registry repoDigest, so its lineage back to upstream sources cannot be independently verified. This lock therefore pins THIS image as the exact patch target — patches apply to this artifact, not to upstream code."
+  - "Lock tooling does not re-check the docker daemon; it verifies the extracted snapshot hashes. Confirming the source image still exists locally (docker inspect risuai:nodeonly-client-aux-handoff-20260829) is a manual step."
+  - "The missing request-fingerprint idempotency in model-jobs.cjs is a gap in the TARGET itself; the kit's patch series now supplies it on top of the pinned artifact, but this lock describes the unpatched target, so the gap is recorded rather than papered over."
+  - "The locked snapshot is verified textually only: better-sqlite3 and the full server runtime are not kit dependencies, so the round-2 bridge behavior is proven by series application, node --check, and pinned-content tests, not by executing the patched server against a live database."
+  - "Principal scoping is single-host-instance by construction: 1.10.0 has no per-user identity to scope by, so bridge rows cannot be attributed to individual users — only to the authenticated instance that created them."

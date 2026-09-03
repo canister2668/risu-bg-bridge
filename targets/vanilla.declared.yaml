@@ -1,0 +1,25 @@
+# Declared-only target record: vanilla RisuAI.
+#
+# This is NOT a lock file. No *.lock.yaml exists for vanilla because nothing
+# about vanilla was verifiable in the beta build environment. Every tool in scripts/ refuses to
+# patch, build, or claim capabilities for a target without a verified lock;
+# this file only records what was claimed, what was checked, and why the
+# answer is "unavailable".
+
+target: "vanilla"
+recordFormat: "declared-1"
+status: "declared-only"
+
+declaredUpstream:
+  product: "RisuAI"
+  repository: "https://github.com/kwaroran/Risuai"
+  version: "unlocked"
+
+localChecks:
+  - "No exact vanilla source checkout or provenance-pinned vanilla image was available in the beta build environment."
+  - "A server patch is therefore not published for vanilla RisuAI in v0.9.0-beta.1."
+
+consequence:
+  - "No vanilla lock can be produced from available sources."
+  - "The vanilla adapter must operate as the stock foreground fallback (runLLMModel) with all durable features reported absent; see adapters/vanilla/."
+  - "Any patch series naming target 'vanilla' fails closed in scripts/apply.mjs with UnverifiableLockError."
