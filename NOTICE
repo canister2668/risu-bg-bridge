@@ -1,0 +1,27 @@
+Risu BG Bridge
+Copyright (C) 2026 canister2668 and contributors
+
+This distribution adopts GNU Affero General Public License version 3 only
+(SPDX: AGPL-3.0-only). See LICENSE for the unmodified license text.
+
+Upstream notices are retained. The pre-existing license file in this repository
+identified GNU GPL version 3 and contained "Copyright (C) 2024 Kwaroran".
+Its complete original text is preserved at LICENSES/GPL-3.0-upstream.txt.
+This notice does not claim that every historical RisuAI/PocketRisu snapshot
+was already AGPL-licensed, or replace notices on third-party components.
+Consult their respective licenses when distributing a combined host image.
+
+The UI continuity additions, including the browser host asset, companion API v3
+plugin, installer, tests, and documentation, are modified/added on 2026-09-05
+and distributed under AGPL-3.0-only. They do not modify model execution or bots.
+
+Corresponding Source:
+https://github.com/canister2668/risu-bg-bridge
+The UI plugin exposes this source link in its settings and plugin metadata.
+Operators distributing further modifications must provide their matching source,
+not merely a link to an older upstream revision. Host images must also preserve
+the source/build instructions and notices applicable to their host components.
+
+License text source:
+https://www.gnu.org/licenses/agpl-3.0.html
+https://github.com/spdx/license-list-data/blob/main/text/AGPL-3.0-only.txt

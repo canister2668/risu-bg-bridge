@@ -225,5 +225,15 @@ Reported honestly in the lock itself; none are silently papered over:
 
 ## License
 
-GPL-3.0-only. The host projects are GPL-3.0 projects, and the published adapter
-patches contain modifications derived from those codebases. See `LICENSE`.
+AGPL-3.0-only for this distribution. See `LICENSE` and `NOTICE` for the project
+terms, corresponding-source link, and retained upstream notices. The original
+GPL-3.0 notice is preserved in `LICENSES/GPL-3.0-upstream.txt`; this does not
+claim that every historical host snapshot was already AGPL-licensed.
+
+## Optional UI continuity companion
+
+The independently installable `plugin/risu-bg-ui-continuity.plugin.js` enables
+Touhou UI scroll restoration through a minimal, opt-in browser bootstrap.
+It defaults OFF and does not alter server jobs, AUX rerolls, bot effects, or
+the in-progress BG provider plugin. See [the UI adapter guide](adapters/ui/README.md)
+for the version-locked installer, permissions, limitations, and tests.
