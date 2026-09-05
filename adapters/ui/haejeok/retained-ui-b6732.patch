@@ -1,0 +1,206 @@
+diff --git a/src/lib/ChatScreens/Chat.svelte b/src/lib/ChatScreens/Chat.svelte
+index 9d15994..805069b 100644
+--- a/src/lib/ChatScreens/Chat.svelte
++++ b/src/lib/ChatScreens/Chat.svelte
+@@ -97,6 +97,10 @@
+     let effectiveChatTarget = $derived(
+         chatTarget ?? chatTargetFromIndexes(targetCharacterIndex, targetChatIndex) ?? undefined
+     )
++    // Explicit card opt-in; other cards keep their existing renderer lifecycle.
++    let preserveUiBody = $derived(characterStore.characters[targetCharacterIndex]?.customscript?.some(
++        script => script.comment?.includes('[UI_CONTINUITY_V1]')
++    ) ?? false)
+ 
+     let msgDisplay = $state('')
+     let translated = $state(false)
+@@ -332,10 +336,20 @@
+         unsubscribers.forEach(u => u())
+     })
+ 
++    let retainedGuiSource: string | null = null
++    let retainedGuiDom: HTMLElement | null = null
+     function RenderGUIHtml(html:string){
+         try {
++            const source = risuChatParser(html ?? '', {chatID: scriptIdx, cbsConditions: getCbsCondition(), chatTarget: effectiveChatTarget})
++            // Re-evaluate CBS dependencies, but do not replace an unchanged theme
++            // tree just because a card-local UI variable changed.
++            if (preserveUiBody && retainedGuiDom && source === retainedGuiSource) return retainedGuiDom
+             const parser = new DOMParser()
+-            const doc = parser.parseFromString(risuChatParser(html ?? '', {chatID: scriptIdx, cbsConditions: getCbsCondition(), chatTarget: effectiveChatTarget}), 'text/html')
++            const doc = parser.parseFromString(source, 'text/html')
++            if (preserveUiBody) {
++                retainedGuiSource = source
++                retainedGuiDom = doc.body
++            }
+             return doc.body   
+         } catch (error) {
+             const placeholder = document.createElement('div')
+@@ -350,6 +364,8 @@
+         if (!origin) {
+             return
+         }
++        // Trigger-owned details must not also perform the native summary toggle.
++        if (preserveUiBody && origin.tagName === 'SUMMARY') event.preventDefault()
+ 
+         const characterIndex = targetCharacterIndex
+         const character = characterStore.characters?.[characterIndex]
+@@ -592,8 +608,10 @@
+             style:font-size="{0.875 * (settingsStore.state.zoomsize / 100)}rem"
+             style:line-height="{(settingsStore.state.lineHeight ?? 1.25) * (settingsStore.state.zoomsize / 100)}rem"
+         >
+-            {#key `${totalLengthPointer}|${chatReloadPointer}`}
++            {#key preserveUiBody ? `${effectiveChatTarget?.characterId}|${effectiveChatTarget?.chatId}|${renderedSourceMessage?.chatId ?? scriptIdx}` : `${totalLengthPointer}|${chatReloadPointer}`}
+                 <ChatBody
++                    {preserveUiBody}
++                    refreshKey={`${totalLengthPointer}|${chatReloadPointer}`}
+                     {character}
+                     {firstMessage}
+                     idx={scriptIdx}
+diff --git a/src/lib/ChatScreens/ChatBody.svelte b/src/lib/ChatScreens/ChatBody.svelte
+index 66c377d..6848557 100644
+--- a/src/lib/ChatScreens/ChatBody.svelte
++++ b/src/lib/ChatScreens/ChatBody.svelte
+@@ -1,4 +1,5 @@
+ <script lang="ts">
++    import { tick } from 'svelte'
+     import { characterStore } from "src/ts/stores/domain/characterStore.svelte";
+ import isEqual from "lodash/isEqual"
+     import { settingsStore } from 'src/ts/stores/domain'
+@@ -27,6 +28,8 @@ import isEqual from "lodash/isEqual"
+         renderRawStreaming?: boolean
+         rawStreamingText?: string
+         chatTarget?: ChatExecutionTarget
++        preserveUiBody?: boolean
++        refreshKey?: string
+     }
+ 
+     let {
+@@ -43,6 +46,8 @@ import isEqual from "lodash/isEqual"
+         renderRawStreaming = false,
+         rawStreamingText = '',
+         chatTarget,
++        preserveUiBody = false,
++        refreshKey = '',
+     }: Props =  $props()
+ 
+     // svelte-ignore non_reactive_update
+@@ -224,7 +229,43 @@ import isEqual from "lodash/isEqual"
+         }
+     }
+ 
+-    let markParsingResult = $derived.by(() => markParsing(msgDisplay, character, idx))
++    let markParsingResult = $derived.by(() => {
++        if (preserveUiBody) refreshKey
++        return markParsing(msgDisplay, character, idx)
++    })
++
++    let retainedHtml = $state('')
++    $effect(() => {
++        if (!preserveUiBody || shouldRenderRawStreaming) return
++        const pending = markParsingResult
++        let current = true
++        void pending.then(async md => {
++            if (!current || typeof md !== 'string') return
++            // Keep the old subtree throughout parsing. Commit once, then restore
++            // the existing theme's scroll owners before the next browser paint.
++            const positions: [HTMLElement, number, number][] = []
++            for (let node = bodyRoot?.parentElement; node; node = node.parentElement) {
++                if (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth) {
++                    positions.push([node, node.scrollTop, node.scrollLeft])
++                }
++            }
++            retainedHtml = addMetadataToElement(trimMarkdown(md), modelShortName)
++            await tick()
++            if (!current) return
++            for (const [node, top, left] of positions) {
++                if (!node.isConnected) continue
++                const value = node.style.getPropertyValue('scroll-behavior')
++                const priority = node.style.getPropertyPriority('scroll-behavior')
++                node.style.setProperty('scroll-behavior', 'auto', 'important')
++                node.scrollTop = top
++                node.scrollLeft = left
++                if (value) node.style.setProperty('scroll-behavior', value, priority)
++                else node.style.removeProperty('scroll-behavior')
++            }
++            checkImg()
++        })
++        return () => { current = false }
++    })
+ 
+     $effect(() => {
+         if(shouldRenderRawStreaming){
+@@ -238,6 +279,8 @@ import isEqual from "lodash/isEqual"
+ 
+ {#if shouldRenderRawStreaming}
+     <span class="whitespace-pre-wrap">{rawStreamingText}</span>
++{:else if preserveUiBody}
++    {@html retainedHtml}
+ {:else}
+     {#await markParsingResult}
+         {@html addMetadataToElement(trimMarkdown(lastParsed), modelShortName)}
+diff --git a/src/lib/ChatScreens/UiContinuityHarness.svelte b/src/lib/ChatScreens/UiContinuityHarness.svelte
+new file mode 100644
+--- /dev/null
++++ b/src/lib/ChatScreens/UiContinuityHarness.svelte
+@@ -0,0 +1,8 @@
++<script lang="ts">
++    import ChatBody from './ChatBody.svelte'
++    let text = $state('initial')
++    let refreshKey = $state('0')
++    export function reload(value: string) { text = value; refreshKey = String(Number(refreshKey) + 1) }
++</script>
++<ChatBody preserveUiBody={true} {refreshKey} msgDisplay={text} role="char"
++    translated={false} translating={false} retranslate={false} modelShortName="" />
+diff --git a/src/lib/ChatScreens/uiContinuity.test.ts b/src/lib/ChatScreens/uiContinuity.test.ts
+new file mode 100644
+--- /dev/null
++++ b/src/lib/ChatScreens/uiContinuity.test.ts
+@@ -0,0 +1,48 @@
++import { afterEach, expect, test, vi } from 'vitest'
++import { mount, unmount, tick } from 'svelte'
++import Harness from './UiContinuityHarness.svelte'
++
++const { parse, pending } = vi.hoisted(() => {
++    const pending: ((value: string) => void)[] = []
++    return { pending, parse: vi.fn(() => new Promise<string>(resolve => pending.push(resolve))) }
++})
++vi.mock('src/ts/stores/domain/characterStore.svelte', () => ({ characterStore: {} }))
++vi.mock('src/ts/stores/domain', () => ({ settingsStore: { state: { newImageHandlingBeta: false } } }))
++vi.mock('src/ts/util', () => ({ sleep: async () => {} }))
++vi.mock('../../ts/alert', () => ({ alertError: vi.fn() }))
++vi.mock('../../ts/parser/parser.svelte', () => ({ ParseMarkdown: parse, trimMarkdown: (s: string) => s,
++    addMetadataToElement: (s: string) => s, postTranslationParse: (s: string) => s, getDistance: vi.fn() }))
++vi.mock('../../ts/translator/translator', () => ({ getLLMCache: vi.fn(), translateHTML: vi.fn() }))
++vi.mock('src/ts/chatAssetResolver', () => ({ resolveCurrentChatAsset: vi.fn() }))
++vi.mock('src/ts/globalApi.svelte', () => ({ getFileSrc: vi.fn() }))
++vi.mock('src/ts/mediaSrc', () => ({ isTauriAssetUrl: vi.fn() }))
++
++let app: { reload(value: string): void } | undefined
++afterEach(async () => { if (app) await unmount(app); app = undefined; pending.length = 0; parse.mockClear(); document.body.innerHTML = '' })
++async function settle() { await tick(); await Promise.resolve(); await tick() }
++
++test('retains the exact DOM while parsing and commits only the latest result', async () => {
++    const target = document.createElement('div'); document.body.append(target)
++    app = mount(Harness, { target }); await settle()
++    pending.shift()!('<div id="card">old</div>'); await settle()
++    const old = target.querySelector('#card')
++    expect(old?.textContent).toBe('old')
++    app.reload('second'); await settle()
++    expect(target.querySelector('#card')).toBe(old)
++    const stale = pending.shift()!
++    app.reload('third'); await settle()
++    const latest = pending.shift()!
++    latest('<div id="card">latest</div>'); await settle()
++    stale('<div id="card">stale</div>'); await settle()
++    expect(target.querySelector('#card')?.textContent).toBe('latest')
++})
++
++test('same rendered HTML does not remount existing effects', async () => {
++    const target = document.createElement('div'); document.body.append(target)
++    app = mount(Harness, { target }); await settle()
++    const html = '<div id="effect">particles</div>'
++    pending.shift()!(html); await settle()
++    const effect = target.querySelector('#effect')
++    app.reload('same-output'); await settle(); pending.shift()!(html); await settle()
++    expect(target.querySelector('#effect')).toBe(effect)
++})
